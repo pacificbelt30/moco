@@ -15,6 +15,7 @@ import shutil
 import time
 import warnings
 from typing import List ,Callable, Optional
+from tqdm import tqdm
 
 import moco.builder
 import moco.loader
@@ -467,7 +468,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     model.train()
 
     end = time.time()
-    for i, (images, _) in enumerate(train_loader):
+    for i, (images, _) in tqdm(enumerate(train_loader)):
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -495,8 +496,8 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
-            progress.display(i)
+        # if i % args.print_freq == 0:
+            # progress.display(i)
 
 
 def save_checkpoint(state, is_best, filename="checkpoint.pth.tar"):
@@ -571,7 +572,7 @@ def accuracy(output, target, topk=(1,)):
 
         res = []
         for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            correct_k = correct[:k].contiguous().view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 
