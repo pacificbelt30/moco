@@ -14,6 +14,7 @@ import random
 import shutil
 import time
 import warnings
+from typing import List ,Callable, Optional
 
 import moco.builder
 import moco.loader
@@ -176,6 +177,14 @@ parser.add_argument(
 )
 parser.add_argument("--cos", action="store_true", help="use cosine lr schedule")
 
+parser.add_argument(
+    "-d",
+    "--dataset",
+    metavar="DATASET",
+    default="ImageNet",
+    help="select dataset (default: ImageNet)",
+)
+
 
 def main():
     args = parser.parse_args()
@@ -318,53 +327,106 @@ def main_worker(gpu, ngpus_per_node, args):
 
     cudnn.benchmark = True
 
-    # Data loading code
-    traindir = os.path.join(args.data, "train")
-    normalize = transforms.Normalize(
-        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-    )
-    if args.aug_plus:
-        # MoCo v2's aug: similar to SimCLR https://arxiv.org/abs/2002.05709
-        augmentation = [
-            transforms.RandomResizedCrop(224, scale=(0.2, 1.0)),
-            transforms.RandomApply(
-                [transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8  # not strengthened
-            ),
-            transforms.RandomGrayscale(p=0.2),
-            transforms.RandomApply([moco.loader.GaussianBlur([0.1, 2.0])], p=0.5),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ]
-    else:
-        # MoCo v1's aug: the same as InstDisc https://arxiv.org/abs/1805.01978
-        augmentation = [
-            transforms.RandomResizedCrop(224, scale=(0.2, 1.0)),
-            transforms.RandomGrayscale(p=0.2),
-            transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ]
+    augmentation: Optional[List] = None
+    train_dataset: Optional[torch.utils.data.Dataset] = None
+    train_loader: Optional[torch.utils.data.DataLoader] = None
+    train_sampler: Optional[torch.utils.data.Sampler] = None
+    if args.dataset == 'ImageNet':
+        # Data loading code
+        traindir = os.path.join(args.data, "train")
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
+        if args.aug_plus:
+            # MoCo v2's aug: similar to SimCLR https://arxiv.org/abs/2002.05709
+            augmentation = [
+                transforms.RandomResizedCrop(224, scale=(0.2, 1.0)),
+                transforms.RandomApply(
+                    [transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8  # not strengthened
+                ),
+                transforms.RandomGrayscale(p=0.2),
+                transforms.RandomApply([moco.loader.GaussianBlur([0.1, 2.0])], p=0.5),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        else:
+            # MoCo v1's aug: the same as InstDisc https://arxiv.org/abs/1805.01978
+            augmentation = [
+                transforms.RandomResizedCrop(224, scale=(0.2, 1.0)),
+                transforms.RandomGrayscale(p=0.2),
+                transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ]
 
-    train_dataset = datasets.ImageFolder(
-        traindir, moco.loader.TwoCropsTransform(transforms.Compose(augmentation))
-    )
+        train_dataset = datasets.ImageFolder(
+            traindir, moco.loader.TwoCropsTransform(transforms.Compose(augmentation))
+        )
 
-    if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-    else:
-        train_sampler = None
+        if args.distributed:
+            train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+        else:
+            train_sampler = None
 
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=(train_sampler is None),
-        num_workers=args.workers,
-        pin_memory=True,
-        sampler=train_sampler,
-        drop_last=True,
-    )
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=(train_sampler is None),
+            num_workers=args.workers,
+            pin_memory=True,
+            sampler=train_sampler,
+            drop_last=True,
+        )
+
+    elif args.dataset == 'CIFAR10':
+        # Data loading code
+        normalize = transforms.Normalize(
+            mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]
+        )
+        if args.aug_plus:
+            # MoCo v2's aug: similar to SimCLR https://arxiv.org/abs/2002.05709
+            augmentation = [
+                transforms.RandomResizedCrop(32, scale=(0.2, 1.0)),
+                transforms.RandomApply(
+                    [transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8  # not strengthened
+                ),
+                transforms.RandomGrayscale(p=0.2),
+                transforms.RandomApply([moco.loader.GaussianBlur([0.1, 2.0])], p=0.5),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ]
+        else:
+            # MoCo v1's aug: the same as InstDisc https://arxiv.org/abs/1805.01978
+            augmentation = [
+                transforms.RandomResizedCrop(32, scale=(0.2, 1.0)),
+                transforms.RandomGrayscale(p=0.2),
+                transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ]
+
+        train_dataset = datasets.CIFAR10(
+            root='data', train=True, transform=moco.loader.TwoCropsTransform(transforms.Compose(augmentation)), download=True
+        )
+
+        if args.distributed:
+            train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+        else:
+            train_sampler = None
+
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=(train_sampler is None),
+            num_workers=args.workers,
+            pin_memory=True,
+            sampler=train_sampler,
+            drop_last=True,
+        )
 
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
